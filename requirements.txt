@@ -3,3 +3,6 @@ langchain
 faiss-cpu
 pypdf
 tiktoken
+pinecone 
+streamlit
+
