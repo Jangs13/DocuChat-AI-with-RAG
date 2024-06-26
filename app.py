@@ -10,6 +10,10 @@ load_dotenv()
 
 HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
 
+if not HUGGINGFACE_API_KEY:
+    st.error("Hugging Face API key not found. Please add it to the .env file.")
+    st.stop()
+
 # Set the title for the Streamlit app
 st.title("RAG Enhanced Chatbot with Pinecone")
 
@@ -17,7 +21,7 @@ st.title("RAG Enhanced Chatbot with Pinecone")
 generator = pipeline('text-generation', model='gpt2', use_auth_token=HUGGINGFACE_API_KEY)
 
 # Cached function to create a vectordb for the provided PDF files
-@st.cache_data
+@st.cache
 def create_vectordb(files, filenames):
     # Show a spinner while creating the vectordb
     with st.spinner("Creating vector database..."):
@@ -60,7 +64,7 @@ question = st.chat_input("Ask anything")
 if question:
     vectordb = st.session_state.get("vectordb", None)
     if not vectordb:
-        with st.message("assistant"):
+        with st.chat_message("assistant"):
             st.write("You need to provide a PDF")
             st.stop()
 
