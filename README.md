@@ -1,5 +1,5 @@
 # DocChat AI with RAG
-RAG enabled Chatbots using [LangChain](https://www.langchain.com) and [OpenAI]([https://databutton.com/login?utm_source=github&utm_medium=avra&utm_article=rag](https://www.google.com/url?sa=i&url=https%3A%2F%2Ficonduck.com%2Ficons%2F1213%2Fopenai&psig=AOvVaw22J6BNkwxOFnfENTUMYFrq&ust=1719519281288000&source=images&cd=vfe&opi=89978449&ved=0CBEQjRxqFwoTCPiUitKK-oYDFQAAAAAdAAAAABAE))
+RAG enabled Chatbots using [LangChain](https://www.langchain.com) and [OpenAI](https://platform.openai.com/docs/guides/embeddings)
 
 DocChat AI is an advanced document chatting application utilizing Retrieval-Augmented Generation (RAG) to provide efficient and accurate responses to user queries. This project leverages OpenAI’s LLM, LangChain, and Pinecone for indexing and querying documents, enhancing query response times and overall system performance.
 
