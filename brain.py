@@ -1,99 +1,79 @@
-import streamlit as st
-from brain import get_index_for_pdf
+import re
+from io import BytesIO
+from typing import Tuple, List
+from sentence_transformers import SentenceTransformer
+from langchain.docstore.document import Document
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from pypdf import PdfReader
+import pinecone
 import os
 from dotenv import load_dotenv
-from transformers import pipeline
-from sentence_transformers import SentenceTransformer
 
-# Load environment variables from .env file
 load_dotenv()
-
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")
 HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
 
-# Set the title for the Streamlit app
-st.title("RAG Enhanced Chatbot with Pinecone")
+# Initialize Pinecone
+pinecone.init(api_key=PINECONE_API_KEY, environment=PINECONE_ENVIRONMENT)
 
-# Initialize Hugging Face text generation pipeline
-generator = pipeline('text-generation', model='gpt2', use_auth_token=HUGGINGFACE_API_KEY)
+# Create a Pinecone index if it doesn't exist
+index_name = "pdf-embeddings"
+if index_name not in pinecone.list_indexes():
+    pinecone.create_index(index_name, dimension=384)  # Dimension should match the embedding size
 
-# Cached function to create a vectordb for the provided PDF files
-@st.cache_data
-def create_vectordb(files, filenames):
-    # Show a spinner while creating the vectordb
-    with st.spinner("Creating vector database..."):
-        vectordb = get_index_for_pdf([file.getvalue() for file in files], filenames)
-    return vectordb
+# Connect to the index
+index = pinecone.Index(index_name)
 
-# Upload PDF files using Streamlit's file uploader
-pdf_files = st.file_uploader("", type="pdf", accept_multiple_files=True)
+def parse_pdf(file: BytesIO, filename: str) -> Tuple[List[str], str]:
+    pdf = PdfReader(file)
+    output = []
+    for page in pdf.pages:
+        text = page.extract_text()
+        text = re.sub(r"(\w+)-\n(\w+)", r"\1\2", text)
+        text = re.sub(r"(?<!\n\s)\n(?!\s\n)", " ", text.strip())
+        text = re.sub(r"\n\s*\n", "\n\n", text)
+        output.append(text)
+    return output, filename
 
-# If PDF files are uploaded, create the vectordb and store it in the session state
-if pdf_files:
-    pdf_file_names = [file.name for file in pdf_files]
-    st.session_state["vectordb"] = create_vectordb(pdf_files, pdf_file_names)
+def text_to_docs(text: List[str], filename: str) -> List[Document]:
+    if isinstance(text, str):
+        text = [text]
+    page_docs = [Document(page_content=page) for page in text]
+    for i, doc in enumerate(page_docs):
+        doc.metadata["page"] = i + 1
 
-# Define the template for the chatbot prompt
-prompt_template = """
-    You are a helpful Assistant who answers users' questions based on multiple contexts given to you.
-    Keep your answer short and to the point.
-    The evidence is the context of the PDF extract with metadata.
-    Carefully focus on the metadata, especially 'filename' and 'page' whenever answering.
-    Make sure to add filename and page number at the end of the sentence you are citing to.
-    Reply "Not applicable" if the text is irrelevant.
-    The PDF content is:
-    {pdf_extract}
-"""
+    doc_chunks = []
+    for doc in page_docs:
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=4000,
+            separators=["\n\n", "\n", ".", "!", "?", ",", " ", ""],
+            chunk_overlap=0,
+        )
+        chunks = text_splitter.split_text(doc.page_content)
+        for i, chunk in enumerate(chunks):
+            doc = Document(
+                page_content=chunk, metadata={"page": doc.metadata["page"], "chunk": i}
+            )
+            doc.metadata["source"] = f"{doc.metadata['page']}-{doc.metadata['chunk']}"
+            doc.metadata["filename"] = filename  # Add filename to metadata
+            doc_chunks.append(doc)
+    return doc_chunks
 
-# Get the current prompt from the session state or set a default value
-prompt = st.session_state.get("prompt", [{"role": "system", "content": "none"}])
-
-# Display previous chat messages
-for message in prompt:
-    if message["role"] != "system":
-        with st.chat_message(message["role"]):
-            st.write(message["content"])
-
-# Get the user's question using Streamlit's chat input
-question = st.chat_input("Ask anything")
-
-# Handle the user's question
-if question:
-    vectordb = st.session_state.get("vectordb", None)
-    if not vectordb:
-        with st.message("assistant"):
-            st.write("You need to provide a PDF")
-            st.stop()
-
-    # Search the vectordb for similar content to the user's question
+def docs_to_index(docs):
     model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2', use_auth_token=HUGGINGFACE_API_KEY)
-    query_vector = model.encode(question)
-    search_results = vectordb.query(queries=[query_vector], top_k=3, include_metadata=True)
+    embeddings = model.encode([doc.page_content for doc in docs])
+    
+    # Upsert embeddings to Pinecone
+    vectors = [(str(i), embeddings[i].tolist(), doc.metadata) for i, doc in enumerate(docs)]
+    index.upsert(vectors)
+    
+    return index
 
-    pdf_extract = "\n".join([result['metadata']['page_content'] for result in search_results['matches']])
-
-    # Update the prompt with the PDF extract
-    prompt[0] = {
-        "role": "system",
-        "content": prompt_template.format(pdf_extract=pdf_extract),
-    }
-
-    # Add the user's question to the prompt and display it
-    prompt.append({"role": "user", "content": question})
-    with st.chat_message("user"):
-        st.write(question)
-
-    # Display an empty assistant message while waiting for the response
-    with st.chat_message("assistant"):
-        botmsg = st.empty()
-
-    # Generate response using Hugging Face model
-    response = generator(prompt_template.format(pdf_extract=pdf_extract) + question, max_length=500)[0]['generated_text']
-
-    # Display the response
-    botmsg.write(response)
-
-    # Add the assistant's response to the prompt
-    prompt.append({"role": "assistant", "content": response})
-
-    # Store the updated prompt in the session state
-    st.session_state["prompt"] = prompt
+def get_index_for_pdf(pdf_files, pdf_names):
+    documents = []
+    for pdf_file, pdf_name in zip(pdf_files, pdf_names):
+        text, filename = parse_pdf(BytesIO(pdf_file), pdf_name)
+        documents += text_to_docs(text, filename)
+    index = docs_to_index(documents)
+    return index
