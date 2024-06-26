@@ -1,8 +1,6 @@
-openai
-langchain
-faiss-cpu
-pypdf
-tiktoken
-pinecone 
 streamlit
-
+python-dotenv
+transformers
+sentence-transformers
+pypdf
+pinecone-client
