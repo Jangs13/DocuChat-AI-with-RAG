@@ -9,10 +9,17 @@ import pinecone
 import os
 from dotenv import load_dotenv
 
+# Load environment variables from .env file
 load_dotenv()
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")
 HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
+
+if not PINECONE_API_KEY or not PINECONE_ENVIRONMENT:
+    raise ValueError("Pinecone API key or environment not found. Please add them to the .env file.")
+
+if not HUGGINGFACE_API_KEY:
+    raise ValueError("Hugging Face API key not found. Please add it to the .env file.")
 
 # Initialize Pinecone
 pinecone.init(api_key=PINECONE_API_KEY, environment=PINECONE_ENVIRONMENT)
@@ -52,12 +59,12 @@ def text_to_docs(text: List[str], filename: str) -> List[Document]:
         )
         chunks = text_splitter.split_text(doc.page_content)
         for i, chunk in enumerate(chunks):
-            doc = Document(
+            doc_chunk = Document(
                 page_content=chunk, metadata={"page": doc.metadata["page"], "chunk": i}
             )
-            doc.metadata["source"] = f"{doc.metadata['page']}-{doc.metadata['chunk']}"
-            doc.metadata["filename"] = filename  # Add filename to metadata
-            doc_chunks.append(doc)
+            doc_chunk.metadata["source"] = f"{doc.metadata['page']}-{doc.metadata['chunk']}"
+            doc_chunk.metadata["filename"] = filename  # Add filename to metadata
+            doc_chunks.append(doc_chunk)
     return doc_chunks
 
 def docs_to_index(docs):
